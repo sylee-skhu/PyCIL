@@ -38,6 +38,12 @@ class DER(BaseLearner):
     def after_task(self):
         self._known_classes = self._total_classes
         logging.info("Exemplar size: {}".format(self.exemplar_size))
+        self._old_network = self._network.copy().freeze()
+        if hasattr(self._old_network, "module"):
+            self.old_network_module_ptr = self._old_network.module
+        else:
+            self.old_network_module_ptr = self._old_network
+        self.save_checkpoint("{}_{}_{}".format(self.args["model_name"], self.args["init_cls"], self.args["increment"]))
 
     def incremental_train(self, data_manager):
         self._cur_task += 1
