@@ -4,7 +4,7 @@ import math
 import torch.utils.model_zoo as model_zoo
 import torch.nn.functional as F
 
-__all__ = ['ResNet', 'resnet18_rep', 'resnet34_rep' ]
+__all__ = ['ResNet', 'resnet18_rep', 'resnet34_rep']
 
 
 def conv3x3(in_planes, out_planes, stride=1):
@@ -17,6 +17,7 @@ def conv1x1(in_planes, out_planes, stride=1):
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=True)
 
+
 class conv_block(nn.Module):
 
     def __init__(self, in_planes, planes, mode, stride=1):
@@ -26,10 +27,10 @@ class conv_block(nn.Module):
         if mode == 'parallel_adapters':
             self.adapter = conv1x1(in_planes, planes, stride)
 
-    
     def re_init_conv(self):
         nn.init.kaiming_normal_(self.adapter.weight, mode='fan_out', nonlinearity='relu')
-        return 
+        return
+
     def forward(self, x):
         y = self.conv(x)
         if self.mode == 'parallel_adapters':
@@ -69,12 +70,12 @@ class BasicBlock(nn.Module):
 
 class ResNet(nn.Module):
 
-    def __init__(self, block, layers, num_classes=100, args = None):
+    def __init__(self, block, layers, num_classes=100, args=None):
         self.inplanes = 64
         super(ResNet, self).__init__()
         assert args is not None
         self.mode = args["mode"]
-        
+
         if 'cifar' in args["dataset"]:
             self.conv1 = nn.Sequential(nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False),
                                        nn.BatchNorm2d(self.inplanes), nn.ReLU(inplace=True))
@@ -95,7 +96,22 @@ class ResNet(nn.Module):
                     nn.ReLU(inplace=True),
                     nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
                 )
-
+        elif 'kohyoung' in args["dataset"]:
+            if args["init_cls"] == args["increment"]:
+                self.conv1 = nn.Sequential(
+                    nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False),
+                    nn.BatchNorm2d(self.inplanes),
+                    nn.ReLU(inplace=True),
+                    nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+                )
+            else:
+                # Following PODNET implmentation
+                self.conv1 = nn.Sequential(
+                    nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False),
+                    nn.BatchNorm2d(self.inplanes),
+                    nn.ReLU(inplace=True),
+                    nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+                )
 
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
@@ -103,7 +119,6 @@ class ResNet(nn.Module):
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
         self.feature = nn.AvgPool2d(4, stride=1)
         self.out_dim = 512
-
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -131,10 +146,12 @@ class ResNet(nn.Module):
         for name, module in self.named_modules():
             if hasattr(module, 'mode'):
                 module.mode = mode
+
     def re_init_params(self):
         for name, module in self.named_modules():
             if hasattr(module, 're_init_conv'):
                 module.re_init_conv()
+
     def forward(self, x):
         x = self.conv1(x)
 
@@ -157,7 +174,7 @@ def resnet18_rep(pretrained=False, **kwargs):
     model = ResNet(BasicBlock, [2, 2, 2, 2], **kwargs)
     if pretrained:
         pretrained_state_dict = model_zoo.load_url(model_urls['resnet18'])
-        now_state_dict        = model.state_dict()
+        now_state_dict = model.state_dict()
         now_state_dict.update(pretrained_state_dict)
         model.load_state_dict(now_state_dict)
     return model
@@ -171,7 +188,7 @@ def resnet34_rep(pretrained=False, **kwargs):
     model = ResNet(BasicBlock, [3, 4, 6, 3], **kwargs)
     if pretrained:
         pretrained_state_dict = model_zoo.load_url(model_urls['resnet34'])
-        now_state_dict        = model.state_dict()
+        now_state_dict = model.state_dict()
         now_state_dict.update(pretrained_state_dict)
         model.load_state_dict(now_state_dict)
     return model
