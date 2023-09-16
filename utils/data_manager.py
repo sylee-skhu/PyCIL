@@ -3,8 +3,9 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
-from utils.data import iCIFAR10, iCIFAR100, iImageNet100, iImageNet1000
+from utils.data import iCIFAR10, iCIFAR100, iImageNet100, iImageNet1000, iKohYoung
 from tqdm import tqdm
+
 
 class DataManager(object):
     def __init__(self, dataset_name, shuffle, seed, init_cls, increment):
@@ -24,10 +25,10 @@ class DataManager(object):
 
     def get_task_size(self, task):
         return self._increments[task]
-    
-    def get_accumulate_tasksize(self,task):
+
+    def get_accumulate_tasksize(self, task):
         return sum(self._increments[:task+1])
-    
+
     def get_total_classnum(self):
         return len(self._class_order)
 
@@ -81,8 +82,7 @@ class DataManager(object):
         else:
             return DummyDataset(data, targets, trsf, self.use_path)
 
-        
-    def get_finetune_dataset(self,known_classes,total_classes,source,mode,appendent,type="ratio"):
+    def get_finetune_dataset(self, known_classes, total_classes, source, mode, appendent, type="ratio"):
         if source == 'train':
             x, y = self._train_data, self._train_targets
         elif source == 'test':
@@ -105,7 +105,7 @@ class DataManager(object):
         for idx in range(0, known_classes):
             append_data, append_targets = self._select(appendent_data, appendent_targets,
                                                        low_range=idx, high_range=idx+1)
-            num=len(append_data)
+            num = len(append_data)
             if num == 0:
                 continue
             old_num_tot += num
@@ -118,12 +118,12 @@ class DataManager(object):
         else:
             assert 0, "not implemented yet"
         new_num_average = int(new_num_tot/(total_classes-known_classes))
-        for idx in range(known_classes,total_classes):
+        for idx in range(known_classes, total_classes):
             class_data, class_targets = self._select(x, y, low_range=idx, high_range=idx+1)
-            val_indx = np.random.choice(len(class_data),new_num_average, replace=False)
+            val_indx = np.random.choice(len(class_data), new_num_average, replace=False)
             val_data.append(class_data[val_indx])
             val_targets.append(class_targets[val_indx])
-        val_data=np.concatenate(val_data)
+        val_data = np.concatenate(val_data)
         val_targets = np.concatenate(val_targets)
         return DummyDataset(val_data, val_targets, trsf, self.use_path)
 
@@ -215,8 +215,8 @@ class DataManager(object):
 
     def _select(self, x, y, low_range, high_range):
         idxes = np.where(np.logical_and(y >= low_range, y < high_range))[0]
-        
-        if isinstance(x,np.ndarray):
+
+        if isinstance(x, np.ndarray):
             x_return = x[idxes]
         else:
             x_return = []
@@ -277,6 +277,8 @@ def _get_idata(dataset_name):
         return iImageNet1000()
     elif name == "imagenet100":
         return iImageNet100()
+    elif name == "kohyoung":
+        return iKohYoung()
     else:
         raise NotImplementedError("Unknown dataset {}.".format(dataset_name))
 

@@ -24,9 +24,9 @@ epochs = 170
 lrate = 0.1
 milestones = [80, 120, 150]
 lrate_decay = 0.1
-batch_size = 128
+batch_size = 500
 weight_decay = 2e-4
-num_workers = 8
+num_workers = 16
 T = 2
 
 
@@ -84,7 +84,7 @@ class DER(BaseLearner):
 
     def train(self):
         self._network.train()
-        if len(self._multiple_gpus) > 1 :
+        if len(self._multiple_gpus) > 1:
             self._network_module_ptr = self._network.module
         else:
             self._network_module_ptr = self._network
