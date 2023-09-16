@@ -18,8 +18,10 @@ from utils.toolkit import target2onehot, tensor2numpy
 
 
 num_workers = 8
-batch_size = 128
+batch_size = 500
 milestones = [80, 120]
+milestones = [7, 15]
+
 
 class SimpleCIL(BaseLearner):
     def __init__(self, args):
@@ -30,14 +32,20 @@ class SimpleCIL(BaseLearner):
 
     def after_task(self):
         self._known_classes = self._total_classes
-    
-    def replace_fc(self,trainloader, model, args):
+        self._old_network = self._network.copy().freeze()
+        if hasattr(self._old_network, "module"):
+            self.old_network_module_ptr = self._old_network.module
+        else:
+            self.old_network_module_ptr = self._old_network
+        self.save_checkpoint("{}_{}_{}".format(self.args["model_name"], self.args["init_cls"], self.args["increment"]))
+
+    def replace_fc(self, trainloader, model, args):
         model = model.eval()
         embedding_list = []
         label_list = []
         with torch.no_grad():
             for i, batch in enumerate(trainloader):
-                (_,data,label) = batch
+                (_, data, label) = batch
                 data = data.cuda()
                 label = label.cuda()
                 embedding = model(data)["features"]
@@ -62,14 +70,14 @@ class SimpleCIL(BaseLearner):
         self._network.update_fc(self._total_classes)
         logging.info("Learning on {}-{}".format(self._known_classes, self._total_classes))
 
-        train_dataset = data_manager.get_dataset(np.arange(self._known_classes, self._total_classes),source="train", mode="train", )
+        train_dataset = data_manager.get_dataset(np.arange(self._known_classes, self._total_classes), source="train", mode="train", )
         self.train_dataset = train_dataset
         self.data_manager = data_manager
         self.train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-        test_dataset = data_manager.get_dataset(np.arange(0, self._total_classes), source="test", mode="test" )
+        test_dataset = data_manager.get_dataset(np.arange(0, self._total_classes), source="test", mode="test")
         self.test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
-        train_dataset_for_protonet = data_manager.get_dataset(np.arange(self._known_classes, self._total_classes),source="train", mode="test", )
+        train_dataset_for_protonet = data_manager.get_dataset(np.arange(self._known_classes, self._total_classes), source="train", mode="test", )
         self.train_loader_for_protonet = DataLoader(train_dataset_for_protonet, batch_size=batch_size, shuffle=True, num_workers=num_workers)
 
         if len(self._multiple_gpus) > 1:
@@ -139,6 +147,3 @@ class SimpleCIL(BaseLearner):
             prog_bar.set_description(info)
 
         logging.info(info)
-    
-
-   
