@@ -21,13 +21,13 @@ import torch
 from torch import nn
 from torch import optim
 from torch.nn import functional as F
-from torch.utils.data import DataLoader,Dataset
+from torch.utils.data import DataLoader, Dataset
 from models.base import BaseLearner
 from utils.inc_net import CosineIncrementalNet, FOSTERNet, IncrementalNet
 from utils.toolkit import count_parameters, target2onehot, tensor2numpy
 from sklearn.svm import LinearSVC
 from torchvision import datasets, transforms
-from utils.autoaugment import CIFAR10Policy,ImageNetPolicy
+from utils.autoaugment import CIFAR10Policy, ImageNetPolicy
 from utils.ops import Cutout
 
 EPSILON = 1e-8
@@ -41,20 +41,18 @@ class FeTrIL(BaseLearner):
         self._means = []
         self._svm_accs = []
 
-
     def after_task(self):
         self._known_classes = self._total_classes
-        
+        self._old_network = self._network.copy().freeze()
+        if hasattr(self._old_network, "module"):
+            self.old_network_module_ptr = self._old_network.module
+        else:
+            self.old_network_module_ptr = self._old_network
+        self.save_checkpoint("{}_{}_{}".format(self.args["model_name"], self.args["init_cls"], self.args["increment"]))
+
     def incremental_train(self, data_manager):
         self.data_manager = data_manager
-        self.data_manager._train_trsf = [
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ColorJitter(brightness=63/255),
-        CIFAR10Policy(),
-        transforms.ToTensor(),
-        Cutout(n_holes=1, length=16),
-        ]
+
         self._cur_task += 1
 
         self._total_classes = self._known_classes + \
@@ -67,7 +65,7 @@ class FeTrIL(BaseLearner):
         if self._cur_task > 0:
             for p in self._network.convnet.parameters():
                 p.requires_grad = False
-        
+
         logging.info('All params: {}'.format(count_parameters(self._network)))
         logging.info('Trainable params: {}'.format(
             count_parameters(self._network, True)))
@@ -87,7 +85,6 @@ class FeTrIL(BaseLearner):
 
         if len(self._multiple_gpus) > 1:
             self._network = self._network.module
-
 
     def _train(self, train_loader, test_loader):
         self._network.to(self._device)
@@ -109,51 +106,51 @@ class FeTrIL(BaseLearner):
             self._build_feature_set()
 
             train_loader = DataLoader(self._feature_trainset, batch_size=self.args["batch_size"], shuffle=True, num_workers=self.args["num_workers"], pin_memory=True)
-            optimizer = optim.SGD(self._network_module_ptr.fc.parameters(),momentum=0.9,lr=self.args["lr"],weight_decay=self.args["weight_decay"])
-            scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer,T_max = self.args["epochs"])
-            
+            optimizer = optim.SGD(self._network_module_ptr.fc.parameters(), momentum=0.9, lr=self.args["lr"], weight_decay=self.args["weight_decay"])
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=self.args["epochs"])
+
             self._train_function(train_loader, test_loader, optimizer, scheduler)
-        self._train_svm(self._feature_trainset,self._feature_testset)
-            
-        
+        # self._train_svm(self._feature_trainset, self._feature_testset)
+
     def _compute_means(self):
         with torch.no_grad():
             for class_idx in range(self._known_classes, self._total_classes):
                 data, targets, idx_dataset = self.data_manager.get_dataset(np.arange(class_idx, class_idx+1), source='train',
-                                                                    mode='test', ret_data=True)
+                                                                           mode='test', ret_data=True)
                 idx_loader = DataLoader(idx_dataset, batch_size=self.args["batch_size"], shuffle=False, num_workers=4)
                 vectors, _ = self._extract_vectors(idx_loader)
                 class_mean = np.mean(vectors, axis=0)
-                self._means.append(class_mean)        
-            
+                self._means.append(class_mean)
+
     def _compute_relations(self):
         old_means = np.array(self._means[:self._known_classes])
         new_means = np.array(self._means[self._known_classes:])
-        self._relations=np.argmax((old_means/np.linalg.norm(old_means,axis=1)[:,None])@(new_means/np.linalg.norm(new_means,axis=1)[:,None]).T,axis=1)+self._known_classes
+        self._relations = np.argmax((old_means/np.linalg.norm(old_means, axis=1)[:, None])@(new_means/np.linalg.norm(new_means, axis=1)[:, None]).T, axis=1)+self._known_classes
+
     def _build_feature_set(self):
         self.vectors_train = []
         self.labels_train = []
         for class_idx in range(self._known_classes, self._total_classes):
             data, targets, idx_dataset = self.data_manager.get_dataset(np.arange(class_idx, class_idx+1), source='train',
-                                                                mode='test', ret_data=True)
+                                                                       mode='test', ret_data=True)
             idx_loader = DataLoader(idx_dataset, batch_size=self.args["batch_size"], shuffle=False, num_workers=4)
             vectors, _ = self._extract_vectors(idx_loader)
             self.vectors_train.append(vectors)
             self.labels_train.append([class_idx]*len(vectors))
-        for class_idx in range(0,self._known_classes):
+        for class_idx in range(0, self._known_classes):
             new_idx = self._relations[class_idx]
             self.vectors_train.append(self.vectors_train[new_idx-self._known_classes]-self._means[new_idx]+self._means[class_idx])
             self.labels_train.append([class_idx]*len(self.vectors_train[-1]))
-        
+
         self.vectors_train = np.concatenate(self.vectors_train)
         self.labels_train = np.concatenate(self.labels_train)
-        self._feature_trainset = FeatureDataset(self.vectors_train,self.labels_train)
-        
+        self._feature_trainset = FeatureDataset(self.vectors_train, self.labels_train)
+
         self.vectors_test = []
         self.labels_test = []
         for class_idx in range(0, self._total_classes):
             data, targets, idx_dataset = self.data_manager.get_dataset(np.arange(class_idx, class_idx+1), source='test',
-                                                                mode='test', ret_data=True)
+                                                                       mode='test', ret_data=True)
             idx_loader = DataLoader(idx_dataset, batch_size=self.args["batch_size"], shuffle=False, num_workers=4)
             vectors, _ = self._extract_vectors(idx_loader)
             self.vectors_test.append(vectors)
@@ -161,7 +158,7 @@ class FeTrIL(BaseLearner):
         self.vectors_test = np.concatenate(self.vectors_test)
         self.labels_test = np.concatenate(self.labels_test)
 
-        self._feature_testset = FeatureDataset(self.vectors_test,self.labels_test)
+        self._feature_testset = FeatureDataset(self.vectors_test, self.labels_test)
 
     def _train_function(self, train_loader, test_loader, optimizer, scheduler):
         prog_bar = tqdm(range(self._epoch_num))
@@ -175,7 +172,7 @@ class FeTrIL(BaseLearner):
             for i, (_, inputs, targets) in enumerate(train_loader):
                 inputs, targets = inputs.to(
                     self._device, non_blocking=True), targets.to(self._device, non_blocking=True)
-                if self._cur_task ==0:
+                if self._cur_task == 0:
                     logits = self._network(inputs)['logits']
                 else:
                     logits = self._network_module_ptr.fc(inputs)['logits']
@@ -199,19 +196,21 @@ class FeTrIL(BaseLearner):
                     self._cur_task, epoch+1, self._epoch_num, losses/len(train_loader), train_acc, test_acc)
             prog_bar.set_description(info)
             logging.info(info)
-    def _train_svm(self,train_set,test_set):
+
+    def _train_svm(self, train_set, test_set):
         train_features = train_set.features.numpy()
         train_labels = train_set.labels.numpy()
         test_features = test_set.features.numpy()
         test_labels = test_set.labels.numpy()
-        train_features = train_features/np.linalg.norm(train_features,axis=1)[:,None]
-        test_features = test_features/np.linalg.norm(test_features,axis=1)[:,None]
+        train_features = train_features/np.linalg.norm(train_features, axis=1)[:, None]
+        test_features = test_features/np.linalg.norm(test_features, axis=1)[:, None]
         svm_classifier = LinearSVC(random_state=42)
-        svm_classifier.fit(train_features,train_labels)
-        logging.info("svm train: acc: {}".format(np.around(svm_classifier.score(train_features,train_labels)*100,decimals=2)))
-        acc = svm_classifier.score(test_features,test_labels)
-        self._svm_accs.append(np.around(acc*100,decimals=2))
+        svm_classifier.fit(train_features, train_labels)
+        logging.info("svm train: acc: {}".format(np.around(svm_classifier.score(train_features, train_labels)*100, decimals=2)))
+        acc = svm_classifier.score(test_features, test_labels)
+        self._svm_accs.append(np.around(acc*100, decimals=2))
         logging.info("svm evaluation: acc_list: {}".format(self._svm_accs))
+
 
 class FeatureDataset(Dataset):
     def __init__(self, features, labels):
