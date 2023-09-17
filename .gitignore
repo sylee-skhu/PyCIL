@@ -2,3 +2,6 @@ data/
 __pycache__/
 logs/
 *.pkl
+train_data/
+valid_data/
+model_save/
