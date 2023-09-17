@@ -18,7 +18,7 @@
     "temp": 0.1,
     "epochs": 25,
     "lr": 0.001,
-    "batch_size": 500,
+    "batch_size": 100,
     "weight_decay": 2e-4,
     "step_size": 15,
     "gamma": 0.1,
